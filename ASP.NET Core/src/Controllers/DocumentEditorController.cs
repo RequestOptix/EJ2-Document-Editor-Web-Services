@@ -1,31 +1,23 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using System.Net.Http;
-using System.Text;
-using System.IO;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Syncfusion.EJ2.DocumentEditor;
 using WDocument = Syncfusion.DocIO.DLS.WordDocument;
 using WFormatType = Syncfusion.DocIO.FormatType;
 using Syncfusion.EJ2.SpellChecker;
-using EJ2APIServices;
-using SkiaSharp;
-using BitMiracle.LibTiff.Classic;
+using Syncfusion.DocIORenderer;
+using Syncfusion.Pdf;
 
-namespace SyncfusionDocument.Controllers
+namespace EJ2APIServices.Controllers
 {
     [Route("api/[controller]")]
     public class DocumentEditorController : Controller
     {
-        private readonly IHostingEnvironment _hostingEnvironment;
-        string path;
+        private readonly IWebHostEnvironment _hostingEnvironment;
+        string? path;
 
-        public DocumentEditorController(IHostingEnvironment hostingEnvironment)
+        public DocumentEditorController(IWebHostEnvironment hostingEnvironment)
         {
             _hostingEnvironment = hostingEnvironment;
             path = Startup.path;
@@ -61,82 +53,11 @@ namespace SyncfusionDocument.Controllers
         //Converts Metafile to raster image.
         private static void OnMetafileImageParsed(object sender, MetafileImageParsedEventArgs args)
         {
-            if (args.IsMetafile)
-            {
-            //MetaFile image conversion(EMF and WMF)
             //You can write your own method definition for converting metafile to raster image using any third-party image converter.
             args.ImageStream = ConvertMetafileToRasterImage(args.MetafileStream);
-            }
-            else
-            {
-            //TIFF image conversion
-            args.ImageStream = TiffToPNG(args.MetafileStream);
-
-            }
         }
 
-        // Converting Tiff to Png image using Bitmiracle https://www.nuget.org/packages/BitMiracle.LibTiff.NET
-       private static MemoryStream TiffToPNG(Stream tiffStream)
-        {
-            MemoryStream imageStream = new MemoryStream();
-            using (Tiff tif = Tiff.ClientOpen("in-memory", "r", tiffStream, new TiffStream()))
-            {
-            // Find the width and height of the image
-            FieldValue[] value = tif.GetField(BitMiracle.LibTiff.Classic.TiffTag.IMAGEWIDTH);
-            int width = value[0].ToInt();
-
-            value = tif.GetField(BitMiracle.LibTiff.Classic.TiffTag.IMAGELENGTH);
-            int height = value[0].ToInt();
-
-            // Read the image into the memory buffer
-            int[] raster = new int[height * width];
-            if (!tif.ReadRGBAImage(width, height, raster))
-            {
-                throw new Exception("Could not read image");
-            }
-
-            // Create a bitmap image using SkiaSharp.
-            using (SKBitmap sKBitmap = new SKBitmap(width, height, SKImageInfo.PlatformColorType, SKAlphaType.Premul))
-            {
-                // Convert a RGBA value to byte array.
-                byte[] bitmapData = new byte[sKBitmap.RowBytes * sKBitmap.Height];
-                for (int y = 0; y < sKBitmap.Height; y++)
-                {
-                    int rasterOffset = y * sKBitmap.Width;
-                    int bitsOffset = (sKBitmap.Height - y - 1) * sKBitmap.RowBytes;
-
-                    for (int x = 0; x < sKBitmap.Width; x++)
-                    {
-                        int rgba = raster[rasterOffset++];
-                        bitmapData[bitsOffset++] = (byte)((rgba >> 16) & 0xff);
-                        bitmapData[bitsOffset++] = (byte)((rgba >> 8) & 0xff);
-                        bitmapData[bitsOffset++] = (byte)(rgba & 0xff);
-                        bitmapData[bitsOffset++] = (byte)((rgba >> 24) & 0xff);
-                    }
-                }
-
-                // Convert a byte array to SKColor array.
-                SKColor[] sKColor = new SKColor[bitmapData.Length / 4];
-                int index = 0;
-                for (int i = 0; i < bitmapData.Length; i++)
-                {
-                    sKColor[index] = new SKColor(bitmapData[i + 2], bitmapData[i + 1], bitmapData[i], bitmapData[i + 3]);
-                    i += 3;
-                    index += 1;
-                }
-
-                // Set the SKColor array to SKBitmap.
-                sKBitmap.Pixels = sKColor;
-
-                // Save the SKBitmap to PNG image stream.
-                sKBitmap.Encode(SKEncodedImageFormat.Png, 100).SaveTo(imageStream);
-                imageStream.Flush();
-            }
-            }
-            return imageStream;
-        }
-
-       private static Stream ConvertMetafileToRasterImage(Stream ImageStream)
+        private static Stream ConvertMetafileToRasterImage(Stream ImageStream)
         {
             //Here we are loading a default raster image as fallback.
             Stream imgStream = GetManifestResourceStream("ImageNotFound.jpg");
@@ -229,7 +150,7 @@ namespace SyncfusionDocument.Controllers
                 document.MailMerge.Execute(CustomerDataModel.GetAllRecords());
                 document.Save(stream, Syncfusion.DocIO.FormatType.Docx);
             }
-            catch (Exception ex)
+            catch (Exception)
             { }
             string sfdtText = "";
             Syncfusion.EJ2.DocumentEditor.WordDocument document1 = Syncfusion.EJ2.DocumentEditor.WordDocument.Load(stream, Syncfusion.EJ2.DocumentEditor.FormatType.Docx);
@@ -318,7 +239,7 @@ namespace SyncfusionDocument.Controllers
         [HttpPost]
         [EnableCors("AllowAllOrigins")]
         [Route("SystemClipboard")]
-        public string SystemClipboard([FromBody]CustomParameter param)
+        public string SystemClipboard([FromBody] CustomParameter param)
         {
             if (param.content != null && param.content != "")
             {
@@ -351,7 +272,7 @@ namespace SyncfusionDocument.Controllers
         [HttpPost]
         [EnableCors("AllowAllOrigins")]
         [Route("RestrictEditing")]
-        public string[] RestrictEditing([FromBody]CustomRestrictParameter param)
+        public string[] RestrictEditing([FromBody] CustomRestrictParameter param)
         {
             if (param.passwordBase64 == "" && param.passwordBase64 == null)
                 return null;
@@ -611,6 +532,33 @@ namespace SyncfusionDocument.Controllers
             WDocument document = new WDocument(stream, WFormatType.Docx);
             stream.Dispose();
             return document;
+        }
+
+        [AcceptVerbs("Post")]
+        [HttpPost]
+        [EnableCors("AllowAllOrigins")]
+        [Route("ExportPdf")]
+        [RequestSizeLimit(134_217_728)]
+        public FileStreamResult ExportPdf([FromBody] SaveParameter data)
+        {
+            // Converts the sfdt to stream
+            Stream document = WordDocument.Save(data.Content, FormatType.Docx);
+            Syncfusion.DocIO.DLS.WordDocument doc = new Syncfusion.DocIO.DLS.WordDocument(document, Syncfusion.DocIO.FormatType.Docx);
+            //Instantiation of DocIORenderer for Word to PDF conversion
+            DocIORenderer render = new DocIORenderer();
+            //Converts Word document into PDF document
+            PdfDocument pdfDocument = render.ConvertToPDF(doc);
+            // Saves the document to server machine file system, you can customize here to save into databases or file servers based on requirement.
+            Stream stream = new MemoryStream();
+
+            pdfDocument.Save(stream);
+            pdfDocument.Close();
+
+            stream.Position = 0;
+            return new FileStreamResult(stream, "application/pdf")
+            {
+                FileDownloadName = "Document1.pdf"
+            };
         }
     }
 }
